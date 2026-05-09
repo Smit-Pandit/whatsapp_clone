@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with <%= targetUser %></title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <header class="chat-header">
+            <div class="header-info">
+                <h3>💬 <%= targetUser %></h3>
+                <span id="header-status" class="header-offline">Offline</span>
+            </div>
+            <a href="/dashboard/<%= currentUser %>" class="leave-btn">Back</a>
+        </header>
+
+        <main class="chat-messages" id="chat-messages">
+            <% messages.forEach(msg => { %>
+                <div class="message <%= msg.senderId === currentUser ? 'sent' : 'received' %>">
+                    <% if (msg.replyTo) { %>
+                        <div class="reply-quote">
+                            <strong><%= msg.replyTo.senderId %>:</strong>
+                            <p><%= msg.replyTo.text %></p>
+                        </div>
+                    <% } %>
+                    <p class="text"><%= msg.text %></p>
+                    <div class="meta">
+                        <button class="reply-btn" 
+                            data-id="<%= msg._id %>" 
+                            data-sender="<%= msg.senderId %>" 
+                            data-text="<%= msg.text %>" 
+                            onclick="triggerReply(this)">Reply</button>
+                        
+                        <% if (msg.senderId === currentUser) { %>
+                            <span class="status-tick <%= msg.status === 'read' ? 'read' : 'sent-tick' %>">
+                                <%= msg.status === 'read' ? '✓✓' : '✓' %>
+                            </span>
+                        <% } %>
+                    </div>
+                </div>
+            <% }) %>
+            
+            <div id="typing-indicator" class="typing-alert hidden">
+                <em><%= targetUser %> is typing...</em>
+            </div>
+        </main>
+
+        <div id="reply-indicator" class="hidden">
+            <span>Replying to <strong id="reply-user"></strong>: <em id="reply-text"></em></span>
+            <button onclick="cancelReply()">✕</button>
+        </div>
+
+        <form id="chat-form">
+            <input type="hidden" id="replyToId" value="">
+            <input type="text" id="msg-input" placeholder="Type a message..." required autocomplete="off">
+            <button type="submit">Send</button>
+        </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const roomId = '<%= roomId %>';
+        const currentUser = '<%= currentUser %>';
+        const targetUser = '<%= targetUser %>';
+        
+        socket.emit('userConnected', currentUser);
+        socket.emit('joinRoom', roomId);
+        socket.emit('markRead', { roomId, reader: currentUser });
+
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const msgInput = document.getElementById('msg-input');
+        const replyToIdInput = document.getElementById('replyToId');
+        const replyIndicator = document.getElementById('reply-indicator');
+        const typingIndicator = document.getElementById('typing-indicator');
+        const headerStatus = document.getElementById('header-status');
+
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        socket.on('onlineUsers', (activeUsers) => {
+            if (activeUsers.includes(targetUser)) {
+                headerStatus.innerText = 'Online';
+                headerStatus.className = 'header-online';
+            } else {
+                headerStatus.innerText = 'Offline';
+                headerStatus.className = 'header-offline';
+                typingIndicator.classList.add('hidden');
+            }
+        });
+
+        socket.on('messagesRead', (data) => {
+            if (data.reader !== currentUser) {
+                document.querySelectorAll('.status-tick.sent-tick').forEach(tick => {
+                    tick.classList.remove('sent-tick');
+                    tick.classList.add('read');
+                    tick.innerText = '✓✓';
+                });
+            }
+        });
+
+        let typingTimer;
+        msgInput.addEventListener('input', () => {
+            socket.emit('typing', { roomId, username: currentUser, isTyping: true });
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+                socket.emit('typing', { roomId, username: currentUser, isTyping: false });
+            }, 2000);
+        });
+
+        socket.on('displayTyping', (data) => {
+            if (data.username === targetUser) {
+                if (data.isTyping) {
+                    typingIndicator.classList.remove('hidden');
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } else {
+                    typingIndicator.classList.add('hidden');
+                }
+            }
+        });
+
+        function triggerReply(btn) {
+            const msgId = btn.getAttribute('data-id');
+            const sender = btn.getAttribute('data-sender');
+            const text = btn.getAttribute('data-text');
+            setReply(msgId, sender, text);
+        }
+
+        function setReply(msgId, sender, text) {
+            replyToIdInput.value = msgId;
+            document.getElementById('reply-user').innerText = sender;
+            document.getElementById('reply-text').innerText = text.substring(0, 30) + '...';
+            replyIndicator.classList.remove('hidden');
+            msgInput.focus();
+        }
+
+        function cancelReply() {
+            replyToIdInput.value = '';
+            replyIndicator.classList.add('hidden');
+        }
+
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const text = msgInput.value.trim();
+            if (!text) return;
+
+            socket.emit('chatMessage', {
+                roomId,
+                senderId: currentUser,
+                text,
+                replyToId: replyToIdInput.value
+            });
+
+            socket.emit('typing', { roomId, username: currentUser, isTyping: false });
+            msgInput.value = '';
+            cancelReply();
+        });
+
+        socket.on('message', (msg) => {
+            typingIndicator.classList.add('hidden');
+
+            const isMine = msg.senderId === currentUser;
+            const div = document.createElement('div');
+            div.classList.add('message', isMine ? 'sent' : 'received');
+            
+            let replyHtml = '';
+            if (msg.replyTo) {
+                replyHtml = `
+                    <div class="reply-quote">
+                        <strong>${msg.replyTo.senderId}:</strong>
+                        <p>${msg.replyTo.text}</p>
+                    </div>`;
+            }
+
+            const safeText = msg.text.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            
+            let tickHtml = '';
+            if (isMine) {
+                tickHtml = `<span class="status-tick sent-tick">✓</span>`;
+            }
+
+            div.innerHTML = `
+                ${replyHtml}
+                <p class="text">${msg.text}</p>
+                <div class="meta">
+                    <button class="reply-btn" 
+                        data-id="${msg._id}" 
+                        data-sender="${msg.senderId}" 
+                        data-text="${safeText}" 
+                        onclick="triggerReply(this)">Reply</button>
+                    ${tickHtml}
+                </div>
+            `;
+            
+            chatMessages.insertBefore(div, typingIndicator);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            if (!isMine) {
+                socket.emit('markRead', { roomId, reader: currentUser });
+            }
+        });
+    </script>
+</body>
+</html>

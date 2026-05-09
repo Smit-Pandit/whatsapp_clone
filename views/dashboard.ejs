@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-body">
+    <div class="login-container dashboard-container">
+        <header class="dash-header">
+            <h2>Chats</h2>
+            <span class="current-user-badge">👤 <%= currentUser %></span>
+        </header>
+        
+        <ul class="user-list" id="user-list-container">
+            <% if (users.length === 0) { %>
+                <li class="empty-state">No other users have logged in yet. Open another tab and log in as someone else!</li>
+            <% } else { %>
+                <% users.forEach(user => { %>
+                    <li id="user-row-<%= user.username %>">
+                        <a href="/chat/<%= currentUser %>/<%= user.username %>" class="chat-row">
+                            <div class="avatar">
+                                <%= user.username.charAt(0).toUpperCase() %>
+                                <div class="status-dot offline" id="status-<%= user.username %>"></div>
+                            </div>
+                            
+                            <div class="chat-details">
+                                <div class="chat-top-row">
+                                    <span class="chat-username"><%= user.username %></span>
+                                    <span class="chat-time" id="time-<%= user.username %>">
+                                        <% if (user.timestamp) { %>
+                                            <%= new Date(user.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) %>
+                                        <% } %>
+                                    </span>
+                                </div>
+                                <div class="chat-bottom-row">
+                                    <span class="chat-preview <%= !user.timestamp ? 'no-messages' : '' %>" id="preview-<%= user.username %>">
+                                        <% if (user.senderId === currentUser) { %>
+                                            <span class="sent-indicator <%= user.status === 'read' ? 'read' : 'sent-tick' %>">
+                                                <%= user.status === 'read' ? '✓✓' : '✓' %>
+                                            </span> 
+                                        <% } %>
+                                        <%= user.lastMessageText %>
+                                    </span>
+                                    
+                                    <div class="unread-badge <%= user.unreadCount === 0 ? 'hidden' : '' %>" id="badge-<%= user.username %>">
+                                        <%= user.unreadCount > 9 ? '9+' : user.unreadCount %>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                <% }) %>
+            <% } %>
+        </ul>
+        
+        <div class="logout-container">
+            <a href="/" class="logout-btn">← Logout</a>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const currentUser = '<%= currentUser %>';
+
+        socket.emit('userConnected', currentUser);
+
+        socket.on('onlineUsers', (activeUsers) => {
+            document.querySelectorAll('.status-dot').forEach(dot => {
+                dot.classList.remove('online');
+                dot.classList.add('offline');
+            });
+
+            activeUsers.forEach(username => {
+                const userDot = document.getElementById(`status-${username}`);
+                if (userDot) {
+                    userDot.classList.remove('offline');
+                    userDot.classList.add('online');
+                }
+            });
+        });
+
+        // NEW: Listen for incoming messages while we are sitting on the dashboard
+        socket.on('dashboardNotification', (msg) => {
+            const sender = msg.senderId;
+
+            // 1. Find the row for the person who just messaged us
+            const userRow = document.getElementById(`user-row-${sender}`);
+            const previewText = document.getElementById(`preview-${sender}`);
+            const badge = document.getElementById(`badge-${sender}`);
+            const timeText = document.getElementById(`time-${sender}`);
+
+            if (userRow) {
+                // Update the text to show what they just said
+                previewText.innerHTML = msg.text;
+                previewText.classList.remove('no-messages');
+
+                // Update the time to "Just now" (or standard time format)
+                timeText.innerText = new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                // Increase the green unread badge number
+                let currentBadgeText = badge.innerText.replace('+', '').trim();
+                let currentCount = parseInt(currentBadgeText) || 0;
+                currentCount++;
+                badge.innerText = currentCount > 9 ? '9+' : currentCount;
+                badge.classList.remove('hidden');
+
+                // FINALLY: Move their chat row to the very top of the list!
+                const listContainer = document.getElementById('user-list-container');
+                listContainer.prepend(userRow);
+            }
+        });
+    </script>
+</body>
+</html>
