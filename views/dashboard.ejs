@@ -81,33 +81,23 @@
                 }
             });
         });
-
-        // NEW: Listen for incoming messages while we are sitting on the dashboard
         socket.on('dashboardNotification', (msg) => {
             const sender = msg.senderId;
-
-            // 1. Find the row for the person who just messaged us
             const userRow = document.getElementById(`user-row-${sender}`);
             const previewText = document.getElementById(`preview-${sender}`);
             const badge = document.getElementById(`badge-${sender}`);
             const timeText = document.getElementById(`time-${sender}`);
 
             if (userRow) {
-                // Update the text to show what they just said
                 previewText.innerHTML = msg.text;
                 previewText.classList.remove('no-messages');
 
-                // Update the time to "Just now" (or standard time format)
                 timeText.innerText = new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
-                // Increase the green unread badge number
                 let currentBadgeText = badge.innerText.replace('+', '').trim();
                 let currentCount = parseInt(currentBadgeText) || 0;
                 currentCount++;
                 badge.innerText = currentCount > 9 ? '9+' : currentCount;
                 badge.classList.remove('hidden');
-
-                // FINALLY: Move their chat row to the very top of the list!
                 const listContainer = document.getElementById('user-list-container');
                 listContainer.prepend(userRow);
             }
